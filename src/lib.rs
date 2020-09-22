@@ -2,9 +2,9 @@
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
 #[derive(Debug)]
-pub struct StrSplit<'r, 'd> {
+pub struct StrSplit<'r, D> {
     remainder: Option<&'r str>,
-    delimiter: &'d str,
+    delimiter: D,
 }
 
 // str -> [char]
@@ -14,8 +14,8 @@ pub struct StrSplit<'r, 'd> {
 // String -> &str  trival (cheap -- AsRef)
 // &str -> String doing heap alloc and copy things over (expensive -- memmove)
 
-impl<'r, 'd> StrSplit<'r, 'd> {
-    pub fn new(haystack: &'r str, delimiter: &'d str) -> Self {
+impl<'r, D> StrSplit<'r, D> {
+    pub fn new(haystack: &'r str, delimiter: D) -> Self {
         Self {
             remainder: Some(haystack),
             delimiter,
@@ -23,13 +23,20 @@ impl<'r, 'd> StrSplit<'r, 'd> {
     }
 }
 
-impl<'r> Iterator for StrSplit<'r, '_> {
+pub trait Delimiter {
+    fn find_next(&self, s: &str) -> Option<(usize, usize)>;
+}
+
+impl<'r, D> Iterator for StrSplit<'r, D>
+where
+    D: Delimiter,
+{
     type Item = &'r str;
     fn next(&mut self) -> Option<Self::Item> {
         let remainder = self.remainder.as_mut()?;
-        if let Some(next_delim) = remainder.find(self.delimiter) {
-            let until_delimiter = &remainder[..next_delim];
-            *remainder = &remainder[(next_delim + self.delimiter.len())..];
+        if let Some((delim_start, delim_end)) = self.delimiter.find_next(remainder) {
+            let until_delimiter = &remainder[..delim_start];
+            *remainder = &remainder[delim_end..];
             Some(until_delimiter)
         } else {
             self.remainder.take()
@@ -37,8 +44,22 @@ impl<'r> Iterator for StrSplit<'r, '_> {
     }
 }
 
+impl Delimiter for char {
+    fn find_next(&self, s: &str) -> Option<(usize, usize)> {
+        s.char_indices()
+            .find(|(_, c)| c == self)
+            .map(|(start, _)| (start, start + self.len_utf8()))
+    }
+}
+
+impl Delimiter for &str {
+    fn find_next(&self, s: &str) -> Option<(usize, usize)> {
+        s.find(self).map(|start| (start, start + self.len()))
+    }
+}
+
 fn until_char(s: &str, c: char) -> &str {
-    StrSplit::new(s, &format! {"{}", c})
+    StrSplit::new(s, c)
         .next()
         .expect("StrSplit always gives at lease one result")
 }
